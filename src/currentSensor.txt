@@ -1,0 +1,48 @@
+
+#include <Arduino.h>
+#include "Wire.h"
+#include <Adafruit_INA219.h>
+
+/*-----------------------------------------------
+  Current Sensor
+-----------------------------------------------*/
+//the current sensor
+#define ma_sensor_addr_red_C (0x40) //Red motor wirie - Phase C
+#define ma_sensor_addr_yellow_A (0x41) //Yellow motor wire - Phase A
+#define ma_sensor_addr_blue_B (0x44) //Blue motor wire  - phase B
+TwoWire currentSenseI2C(0);
+Adafruit_INA219 current_sense_yellow_A(ma_sensor_addr_yellow_A);
+Adafruit_INA219 current_sense_blue_B(ma_sensor_addr_blue_B);
+Adafruit_INA219 current_sense_red_C(ma_sensor_addr_red_C);
+#define cur_SDA_PIN 2
+#define cur_SCL_PIN 1
+
+float current_mA = 0;
+
+// current sensor - this requires the modified simpleFoc library
+InlineCurrentSense current_sense = InlineCurrentSense(&current_sense_red_C, &current_sense_blue_B, &current_sense_yellow_A);
+
+
+void setup() {
+  
+  currentSenseI2C.begin(cur_SDA_PIN, cur_SCL_PIN); //SDA - SCL
+   // Initialize the INA219 sensor
+  if (!current_sense_yellow_A.begin(&currentSenseI2C)) {
+    Serial.println("Failed to initialize current_sense_1!");
+    while (1); // Halt the program if initialization fails
+  }
+  if (!current_sense_blue_B.begin(&currentSenseI2C)) {
+    Serial.println("Failed to initialize current_sense_2!");
+    while (1); // Halt the program if initialization fails
+  }
+  if (!current_sense_red_C.begin(&currentSenseI2C)) {
+    Serial.println("Failed to initialize current_sense_3!");
+    while (1); // Halt the program if initialization fails
+  }
+
+  motor.linkCurrentSense(&current_sense);
+}
+
+void loop() {
+
+}

@@ -1,6 +1,8 @@
 #include "my_functions.h"
 #include "Adafruit_GC9A01A.h"
 #include <Arduino.h>
+#include <map>
+#include <array>
 
 void drawLineOnCircle(Adafruit_GC9A01A tft, float outerRadius, float innerRadius) {
     // Loop through 24 points (360 degrees / 15 degrees)
@@ -22,4 +24,30 @@ void drawTicks(Adafruit_GC9A01A tft) {
   float w = tft.width();
   float h = tft.height();
   drawLineOnCircle(tft, (h/2), ((h/2) * 0.25));
+}
+
+// Define the map data structure
+std::map<float, std::array<float, 4>> cacheMap;
+
+// Function to add a value to the cache
+void addToCache(float key, float value1, float value2, float value3, float value4) {
+    // Create an array to hold the values
+    std::array<float, 4> values = {value1, value2, value3, value4};
+
+    // Add the key-value pair to the map
+    cacheMap[key] = values;
+}
+
+// Function to retrieve values from the cache
+std::array<float, 4> getFromCache(float key) {
+    // Check if the key exists in the map
+    auto it = cacheMap.find(key);
+    if (it != cacheMap.end()) {
+        // Return the array of values corresponding to the key
+        return it->second;
+    } else {
+        // Return an empty array or handle the case where the key is not found
+        // For simplicity, returning an array with all elements set to 0
+        return {0.0f, 0.0f, 0.0f, 0.0f};
+    }
 }

@@ -11,6 +11,7 @@
 		"*.tcc": "cpp",
 		"cmath": "cpp",
 		"random": "cpp",
-		"functional": "cpp"
+		"functional": "cpp",
+		"map": "cpp"
 	}
 }

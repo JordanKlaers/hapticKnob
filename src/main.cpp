@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include "./my_functions.h"
 #include "Adafruit_GC9A01A.h"
@@ -6,6 +5,35 @@
 #include <Adafruit_INA219.h>
 #include <SimpleFOC.h>
 #include "haptic.h"
+#include <cmath>
+
+class CircularBuffer {
+private:
+    std::array<float, 3> buffer; // Fixed-size buffer to store the last two floats
+    int writeIndex; // Index to write new values
+public:
+    CircularBuffer() : writeIndex(0) {} // Constructor initializes writeIndex to 0
+    
+    bool add(float value) {
+        // Shift the existing values to make room for the new one - only if its not the same as the last value
+        if (value != buffer[0]) {
+          buffer[2] = buffer[1];
+          buffer[1] = buffer[0];
+          buffer[0] = value;
+        }
+        return buffer[0] == buffer[2] && buffer[1] != buffer[0];
+    }
+    
+    float getLast() {
+        return buffer[0];
+    }
+    float getSecondLast() {
+        return buffer[1];
+    }
+    // isFluttering() {
+    //   return buffer[0] == buffer[2] && buffer[1] != buffer[0];
+    // }
+};
 /*-----------------------------------------------
   LCD Display
 -----------------------------------------------*/
@@ -16,6 +44,26 @@
 #define DC     7
 #define CS     15
 Adafruit_GC9A01A tft(CS, DC, MOSI, SCLK, RES, MISO);
+
+float h = 0;
+float outerRadius = 0;
+float innerRadius = 0;
+uint16_t screenBuffer[240 * 240];
+
+/*-----------------------------------------------
+  Motor Driver
+-----------------------------------------------*/
+#define UL 14 //red motor wire
+#define UH 13 //red motor wire  - phase C
+#define VL 12 //Blue motor wire
+#define VH 21 //Blue motor wire -   pahse B
+#define WL 47 //yellow motor wire
+#define WH 48 //yellow motor wire - phase A
+BLDCDriver6PWM driver = BLDCDriver6PWM(WH, WL, VH, VL, UH, UL);
+
+
+BLDCMotor motor = BLDCMotor(7);//, 7.8, 270);
+
 
 
 /*-----------------------------------------------
@@ -34,23 +82,9 @@ Adafruit_INA219 current_sense_red_C(ma_sensor_addr_red_C);
 
 float current_mA = 0;
 
-// current sensor
+// current sensor - this requires the modified simpleFoc library
 InlineCurrentSense current_sense = InlineCurrentSense(&current_sense_red_C, &current_sense_blue_B, &current_sense_yellow_A);
 
-
-/*-----------------------------------------------
-  Motor Driver
------------------------------------------------*/
-#define UL 14 //red motor wire
-#define UH 13 //red motor wire  - phase C
-#define VL 12 //Blue motor wire
-#define VH 21 //Blue motor wire -   pahse B
-#define WL 47 //yellow motor wire
-#define WH 48 //yellow motor wire - phase A
-BLDCDriver6PWM driver = BLDCDriver6PWM(WH, WL, VH, VL, UH, UL);
-
-
-BLDCMotor motor = BLDCMotor(7);//, 7.8, 270);
 
 
 /*-----------------------------------------------
@@ -61,21 +95,61 @@ TwoWire positionSensorI2C(1);
 #define pos_SDA_PIN 17
 #define pos_SCL_PIN 16
 
-PIDController P_haptic(0.7,0,0,100000,5);
+/*-----------------------------------------------
+  Haptic controller and things
+-----------------------------------------------*/
+
+PIDController P_haptic(1.2,0,0,100000,5);
 float shaftVelocity = 60;
 // attractor angle variable
 float attract_angle = 0;
 // distance between attraction points
-float attractor_distance = (15 * 3.14159265359f)/180.0; // dimp each 45 degrees
+float attractor_distance = (17.1428571429 * 3.14159265359f)/180.0; // 21 attractors should be divisible by 7 and work with the poll count hopeuflly
 float findAttractor(float current_angle){
   return round(current_angle/attractor_distance)*attractor_distance;
 }
-float h = 0;
-float outerRadius = 0;
-float innerRadius = 0;
-uint16_t screenBuffer[240 * 240];
+
+
+/*-----------------------------------------------
+  Tasks
+-----------------------------------------------*/
+TaskHandle_t motorTaskHandle;
+TaskHandle_t lcdTaskHandle;
+void motorTask(void *pvParameters);
+void lcdTask(void *pvParameters);
+
+std::array<float, 4> coordinates = {0.0f, 0.0f, 0.0f, 0.0f};
+CircularBuffer buffer;
+bool isFluttering = false;
+
+Commander command = Commander(Serial);
+void doMotor(char* cmd) { command.motor(&motor, cmd); }
+
+
 void setup() {
   Serial.begin(115200);
+
+  // Add some sample values
+  buffer.add(0.0f);
+  buffer.add(0.0f);
+  buffer.add(0.0f);
+
+  currentSenseI2C.begin(cur_SDA_PIN, cur_SCL_PIN); //SDA - SCL
+   // Initialize the INA219 sensor
+  if (!current_sense_yellow_A.begin(&currentSenseI2C)) {
+    Serial.println("Failed to initialize current_sense_1!");
+    while (1); // Halt the program if initialization fails
+  }
+  if (!current_sense_blue_B.begin(&currentSenseI2C)) {
+    Serial.println("Failed to initialize current_sense_2!");
+    while (1); // Halt the program if initialization fails
+  }
+  if (!current_sense_red_C.begin(&currentSenseI2C)) {
+    Serial.println("Failed to initialize current_sense_3!");
+    while (1); // Halt the program if initialization fails
+  }
+  current_sense.init();
+
   positionSensorI2C.begin(pos_SDA_PIN, pos_SCL_PIN);
   as5600.init(&positionSensorI2C);
   motor.linkSensor(&as5600);
@@ -95,37 +169,122 @@ void setup() {
   motor.init();
   motor.initFOC();
   motor.target = 0;
-  Serial.println("Motor ready!");
-  Serial.println("Set target velocity [rad/s]");
   _delay(1000);
 
   
   tft.begin();
   tft.fillScreen(GC9A01A_BLACK);
-  drawTicks(tft);
+  //drawTicks(tft);
   h = tft.height();
   outerRadius = h/2;
-  innerRadius = (h/2) * 0.5;
-}
-float previousShaftAngle = -1;
-void loop() {
-  motor.loopFOC();
-  motor.move(P_haptic(attract_angle - motor.shaft_angle));
-  attract_angle = findAttractor(motor.shaft_angle);
-  //float radians = angle * M_PI / 180.0f;
-  if (previousShaftAngle > -1) {
-    float x1 = (innerRadius * cos(previousShaftAngle)) + outerRadius;
-    float x2 = (outerRadius * cos(previousShaftAngle)) + outerRadius;
-    float y1 = (innerRadius * sin(previousShaftAngle)) + outerRadius;
-    float y2 = (outerRadius * sin(previousShaftAngle)) + outerRadius;
+  innerRadius = (h/2) * 0.25;
 
-    tft.drawLine(x1, y1, x2, y2, GC9A01A_BLACK);  
+  for (float i = 0; i < 361; i++) {
+    
+    addToCache(
+      i,
+      (innerRadius * cos(i * M_PI / 180.0f)) + outerRadius,
+      (innerRadius * sin(i * M_PI / 180.0f)) + outerRadius,
+      (outerRadius * cos(i * M_PI / 180.0f)) + outerRadius,
+      (outerRadius * sin(i * M_PI / 180.0f)) + outerRadius
+    );
   }
-  previousShaftAngle = motor.shaft_angle;
-  float a_x1 = (innerRadius * cos(motor.shaft_angle)) + outerRadius;
-  float a_x2 = (outerRadius * cos(motor.shaft_angle)) + outerRadius;
-  float a_y1 = (innerRadius * sin(motor.shaft_angle)) + outerRadius;
-  float a_y2 = (outerRadius * sin(motor.shaft_angle)) + outerRadius;
 
-  tft.drawLine(a_x1, a_y1, a_x2, a_y2, GC9A01A_WHITE);
+
+  xTaskCreatePinnedToCore(motorTask, "MotorTask", 10000, NULL, 1, NULL, 0); // Task assigned to core 0
+  xTaskCreatePinnedToCore(lcdTask, "LCDTask", 10000, NULL, 1, NULL, 1); // Task assigned to core 1
 }
+//This one is for the lcd
+float shaftAngle = 0;
+//This one is for the motor
+float currentShaftAngle = 0;
+
+void loop() {
+}
+
+bool isWithinThreshold(float value1, float value2, float threshold) {
+    // Calculate the absolute difference between the two values
+    float absDiff = std::abs(value1 - value2);
+    
+    // Handle the special case where the values are close to the range boundary
+    if (absDiff > 180.0) {
+        absDiff = 360.0 - absDiff;
+    }
+    
+    // Compare the absolute difference against the threshold
+    return absDiff < threshold;
+}
+PhaseCurrent_s donk;
+
+void motorTask(void *pvParameters) {
+  while (1) {
+    /*
+    donk = current_sense.getPhaseCurrents();
+    Serial.print("current max:");
+    Serial.print(0.3);
+    Serial.print(",");
+    Serial.print("current min:");
+    Serial.print(-0.3);
+    Serial.print(",");
+    Serial.print("current:");
+    Serial.println(max(max(donk.a, donk.b), donk.c));
+    */
+    motor.loopFOC();
+    currentShaftAngle = motor.shaft_angle;
+    motor.move(P_haptic(attract_angle - currentShaftAngle));
+    attract_angle = findAttractor(currentShaftAngle);
+  }
+}
+float normalizeRadians(float radians) {
+    float twoPi = 2 * M_PI; // Define 2π
+
+    // Use modulus operator to wrap radians into the desired range
+    radians = fmod(radians, twoPi);
+
+    // Ensure radians is positive
+    if (radians < 0) {
+        radians += twoPi;
+    }
+
+    return radians;
+}
+void lcdTask(void *pvParameters) {
+  while (1) {
+    
+    
+    shaftAngle = normalizeRadians(motor.shaft_angle);
+    Serial.println(shaftAngle);
+    float shaftDegree = round(shaftAngle * (360.0f / (2 * M_PI)));
+    //reading a new degree
+    if (shaftDegree != buffer.getLast()) {
+      //if its not fluttering, we can add the new value
+      if (!isFluttering) {
+        //+/- 1 and not fluttering
+        isFluttering = buffer.add(shaftDegree);
+
+        //erase the old
+        coordinates = getFromCache(buffer.getSecondLast());
+        tft.fillCircle(coordinates[0], coordinates[1], 5, GC9A01A_BLACK);
+        //tft.drawLine(coordinates[0], coordinates[1], coordinates[2], coordinates[3], GC9A01A_BLACK);
+        //draw the new
+        coordinates = getFromCache(buffer.getLast());
+        tft.fillCircle(coordinates[0], coordinates[1], 5, GC9A01A_WHITE);
+        //tft.drawLine(coordinates[0], coordinates[1], coordinates[2], coordinates[3], GC9A01A_WHITE);
+      }
+      //if its fluttering, then we only add new value if tis +/- 2
+      else if (!isWithinThreshold(shaftDegree, buffer.getLast(), 2)) {
+        isFluttering = buffer.add(shaftDegree);
+
+        //erase the old
+        coordinates = getFromCache(buffer.getSecondLast());
+        tft.fillCircle(coordinates[0], coordinates[1], 5, GC9A01A_BLACK);
+        //tft.drawLine(coordinates[0], coordinates[1], coordinates[2], coordinates[3], GC9A01A_BLACK);
+        //draw the new
+        coordinates = getFromCache(buffer.getLast());
+        tft.fillCircle(coordinates[0], coordinates[1], 5, GC9A01A_WHITE);
+        //tft.drawLine(coordinates[0], coordinates[1], coordinates[2], coordinates[3], GC9A01A_WHITE);
+      }
+    }
+  }
+}
+

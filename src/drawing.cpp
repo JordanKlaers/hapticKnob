@@ -6,7 +6,7 @@
 
 void drawLineOnCircle(Adafruit_GC9A01A tft, float outerRadius, float innerRadius) {
     // Loop through 24 points (360 degrees / 15 degrees)
-    for (int angle = 0; angle < 360; angle += 15) {
+    for (int angle = 0; angle < 360; angle += 17.1428571429) {
         // Convert angle from degrees to radians
         float radians = angle * M_PI / 180.0f;
         

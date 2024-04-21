@@ -557,7 +557,7 @@ void Adafruit_SPITFT::initSPI(uint32_t freq, uint8_t spiMode) {
     // SERCOM so we can't make those calls ourselves here. And the SPI
     // device needs to be set up before calling this because it's
     // immediately followed with initialization commands. Blargh.
-    if (
+    if (true ||
 #if !defined(SPI_INTERFACES_COUNT)
         1
 #else
@@ -581,10 +581,20 @@ void Adafruit_SPITFT::initSPI(uint32_t freq, uint8_t spiMode) {
 #endif
 #endif // end SPI_INTERFACES_COUNT
     ) {
-      hwspi._spi->begin();
+      /*
+        For ESP32-S3 custom enfore hardware spi with my specific pins
+        #define MISO   -1
+        #define SCLK   4
+        #define MOSI   5
+        #define RES    6
+        #define DC     7
+        #define CS     15
+      */
+      Serial.println("Hardware spi woooo");
+      hwspi._spi->begin(4, -1, 5, 15);
     }
   } else if (connection == TFT_SOFT_SPI) {
-
+    Serial.println("aww man software spi");
     pinMode(swspi._mosi, OUTPUT);
     digitalWrite(swspi._mosi, LOW);
     pinMode(swspi._sck, OUTPUT);

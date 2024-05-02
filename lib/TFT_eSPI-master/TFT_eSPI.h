@@ -523,7 +523,7 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
 
   void     drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color),
            drawCircleHelper(int32_t x, int32_t y, int32_t r, uint8_t cornername, uint32_t color),
-           fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color, bool endWrite = true),
+           fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color),
            fillCircleHelper(int32_t x, int32_t y, int32_t r, uint8_t cornername, int32_t delta, uint32_t color),
 
            drawEllipse(int16_t x, int16_t y, int32_t rx, int32_t ry, uint16_t color),
@@ -553,7 +553,7 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
            // Draw an anti-aliased filled circle at x, y with radius r
            // Note: The thickness of line is 3 pixels to reduce the visible "braiding" effect of anti-aliasing narrow lines
            //       this means the inner anti-alias zone is always at r-1 and the outer zone at r+1
-  void     drawSmoothCircle(int32_t x, int32_t y, int32_t r, uint32_t fg_color, uint32_t bg_color, bool endWrite = true);
+  void     drawSmoothCircle(int32_t x, int32_t y, int32_t r, uint32_t fg_color, uint32_t bg_color);
   
            // Draw an anti-aliased filled circle at x, y with radius r
            // If bg_color is not included the background pixel colour will be read from TFT or sprite
@@ -562,7 +562,7 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
            // Draw a rounded rectangle that has a line thickness of r-ir+1 and bounding box defined by x,y and w,h
            // The outer corner radius is r, inner corner radius is ir
            // The inside and outside of the border are anti-aliased
-  void     drawSmoothRoundRect(int32_t x, int32_t y, int32_t r, int32_t ir, int32_t w, int32_t h, uint32_t fg_color, uint32_t bg_color = 0x00FFFFFF, uint8_t quadrants = 0xF, bool endWrite = true);
+  void     drawSmoothRoundRect(int32_t x, int32_t y, int32_t r, int32_t ir, int32_t w, int32_t h, uint32_t fg_color, uint32_t bg_color = 0x00FFFFFF, uint8_t quadrants = 0xF);
 
            // Draw a filled rounded rectangle , corner radius r and bounding box defined by x,y and w,h
   void     fillSmoothRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t radius, uint32_t color, uint32_t bg_color = 0x00FFFFFF);

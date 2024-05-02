@@ -2411,7 +2411,7 @@ void TFT_eSPI::drawCircleHelper( int32_t x0, int32_t y0, int32_t rr, uint8_t cor
 ***************************************************************************************/
 // Optimised midpoint circle algorithm, changed to horizontal lines (faster in sprites)
 // Improved algorithm avoids repetition of lines
-void TFT_eSPI::fillCircle(int32_t x0, int32_t y0, int32_t r, uint32_t color, bool endWrite)
+void TFT_eSPI::fillCircle(int32_t x0, int32_t y0, int32_t r, uint32_t color)
 {
   int32_t  x  = 0;
   int32_t  dx = 1;
@@ -2441,10 +2441,9 @@ void TFT_eSPI::fillCircle(int32_t x0, int32_t y0, int32_t r, uint32_t color, boo
     drawFastHLine(x0 - r, y0 - x, dy+1, color);
 
   }
-  if (endWrite) {
-    inTransaction = lockTransaction;
-    end_tft_write();              // Does nothing if Sprite class uses this function
-  }
+  
+  inTransaction = lockTransaction;
+  end_tft_write();              // Does nothing if Sprite class uses this function
 }
 
 /***************************************************************************************
@@ -4235,9 +4234,9 @@ void TFT_eSPI::drawArc(int32_t x, int32_t y, int32_t r, int32_t ir,
 ** Description:             Draw a smooth circle
 ***************************************************************************************/
 // To have effective anti-aliasing the circle will be 3 pixels thick
-void TFT_eSPI::drawSmoothCircle(int32_t x, int32_t y, int32_t r, uint32_t fg_color, uint32_t bg_color, bool endWrite)
+void TFT_eSPI::drawSmoothCircle(int32_t x, int32_t y, int32_t r, uint32_t fg_color, uint32_t bg_color)
 {
-  drawSmoothRoundRect(x-r, y-r, r, r-1, 0, 0, fg_color, bg_color, endWrite);
+  drawSmoothRoundRect(x-r, y-r, r, r-1, 0, 0, fg_color, bg_color);
 }
 
 /***************************************************************************************
@@ -4307,7 +4306,7 @@ void TFT_eSPI::fillSmoothCircle(int32_t x, int32_t y, int32_t r, uint32_t color,
 //   0x1 | 0x2
 //    ---¦---    Arc quadrant mask select bits (as in drawCircleHelper fn)
 //   0x8 | 0x4
-void TFT_eSPI::drawSmoothRoundRect(int32_t x, int32_t y, int32_t r, int32_t ir, int32_t w, int32_t h, uint32_t fg_color, uint32_t bg_color, uint8_t quadrants, bool endWrite)
+void TFT_eSPI::drawSmoothRoundRect(int32_t x, int32_t y, int32_t r, int32_t ir, int32_t w, int32_t h, uint32_t fg_color, uint32_t bg_color, uint8_t quadrants)
 {
   if (_vpOoB) return;
   if (r < ir) transpose(r, ir); // Required that r > ir
@@ -4392,12 +4391,9 @@ void TFT_eSPI::drawSmoothRoundRect(int32_t x, int32_t y, int32_t r, int32_t ir, 
   if ((quadrants & 0x3) == 0x3) fillRect(x, y - r + 1, w + 1, t, fg_color);     // Top
   if ((quadrants & 0x6) == 0x6) fillRect(x + r - t + w, y, t, h + 1, fg_color); // Right
 
-  if (endWrite) {
-    Serial.println("end write was true");
-    inTransaction = lockTransaction;
-    end_tft_write();
-  }
-  Serial.println("edn write was false");
+  
+  inTransaction = lockTransaction;
+  end_tft_write();
 }
 
 /***************************************************************************************

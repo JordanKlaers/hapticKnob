@@ -5601,7 +5601,7 @@ int16_t TFT_eSPI::drawString(const char *string, int32_t poX, int32_t poY, uint8
     }
   }
 
-
+  //textbgcolor = TFT_TRANSPARENT;
   int8_t xo = 0;
 #ifdef LOAD_GFXFF
   if (freeFont && (textcolor!=textbgcolor)) {

@@ -1,0 +1,148 @@
+#include <Arduino.h>
+#include "./my_functions.h"
+#include "Adafruit_GC9A01A.h"
+#include "Wire.h"
+#include <Adafruit_INA219.h>
+#include <SimpleFOC.h>
+#include "haptic.h"
+#include <cmath>
+#include <TFT_eSPI.h>
+#include "esp_task_wdt.h"
+#include <random> 
+/*-----------------------------------------------
+	LCD Display
+-----------------------------------------------*/
+#define MISO   -1
+#define SCLK   4
+#define MOSI   5
+#define RES    6
+#define DC     7
+#define CS     15
+#define TFT_WIDTH  240
+#define TFT_HEIGHT 240
+
+TFT_eSPI tft = TFT_eSPI();
+TFT_eSprite background = TFT_eSprite(&tft);
+TFT_eSprite dot = TFT_eSprite(&tft);
+
+CircularBuffer buffer;
+
+TaskHandle_t motorTaskHandle;
+TaskHandle_t lcdTaskHandle;
+void motorTask(void *pvParameters);
+void lcdTask(void *pvParameters);
+
+QueueHandle_t floatQueue;
+
+// Task function to send float values to the queue
+void senderTask(void *pvParameters) {
+    float valueToSend = 3.14; // Example float value
+    while (1) {
+        // Send the float value to the queue
+        if (xQueueSend(floatQueue, &valueToSend, 0) != pdTRUE) {
+            // Handle queue full error
+			Serial.println("Tried to add but was full");
+        }
+        // Delay before sending the next value
+        //vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1000 milliseconds
+    }
+}
+#define configCHECK_FOR_STACK_OVERFLOW 1
+
+void setup() {
+    Serial.begin(115200);
+	buffer.add(0.0f);
+	buffer.add(0.0f);
+	buffer.add(0.0f);
+    /*------------------------------------------------------------
+		Setting up TFT
+			this uses a background sprint to draw/clear the dot
+			the background is pushed into the display with as much transparency as possible
+
+			X and Y coordinates for the dot position are associated to the degree of the sensor
+			values are saved in an object that can manage fluttering vaules as well
+	------------------------------------------------------------*/
+	tft.begin();
+	tft.setRotation(1);
+	tft.fillScreen(GC9A01A_BLACK);
+	
+	//start with black background -> push it to display -> then reset to transparent so subsequent pushes are faster
+	background.createSprite(240, 240);
+	background.setPivot(TFT_WIDTH / 2, TFT_HEIGHT / 2);
+	background.fillSprite(GC9A01A_BLACK);
+	background.pushSprite(0,0);
+	background.fillSprite(TFT_TRANSPARENT);
+	//dot only needs to be big enough for the circle - the pivot point is the center of the screen
+	dot.createSprite(21, 21);
+	dot.setPivot(10, (TFT_HEIGHT / 2) - 10);
+	dot.fillSprite(TFT_TRANSPARENT);
+
+
+    // Create the queue
+    floatQueue = xQueueCreate(1, sizeof(float)); // Create a queue to hold 5 float values
+    
+    // Create tasks
+    // xTaskCreate(senderTask, "SenderTask", 10000, NULL, 1, NULL);
+    // xTaskCreate(receiverTask, "ReceiverTask", 10000, NULL, 1, NULL);
+	xTaskCreatePinnedToCore(motorTask, "MotorTask", 40000, NULL, 1, &motorTaskHandle, 1); // Task assigned to core 1
+	xTaskCreatePinnedToCore(lcdTask, "LCDTask", 40000, NULL, 1, &lcdTaskHandle, 0); // Task assigned to core 1
+	//esp_task_wdt_delete(lcdTaskHandle);
+}
+
+// Create a random number generator engine and uniform distribution object
+std::random_device rd;
+std::mt19937 gen(rd());
+std::uniform_real_distribution<float> dis(0.0f, 360.0f);
+
+float getRandomAngle() {
+    
+    // Generate a random floating-point number between 0 and 360
+    return dis(gen);
+}
+void motorTask(void *pvParameters) {
+	while (1) {
+// 		motor.loopFOC();
+// 		motorShaftAngle = motor.shaft_angle;
+// 		motor.move(P_haptic(attract_angle - motorShaftAngle));
+// 		attract_angle = findAttractor(motorShaftAngle);
+		// buffer.add(getRandomAngle());
+		float sender = getRandomAngle();
+		if (xQueueSend(floatQueue, &sender, 0) != pdTRUE) {
+            // Handle queue full error
+			Serial.println("Tried to add but was full");
+        }
+	}
+}
+
+
+
+
+float receivedValue;
+float dot_angle = 0;
+// Task function to receive float values from the queue
+void lcdTask(void *pvParameters) {
+    while (1) {
+        // Receive the float value from the queue
+        if (xQueueReceive(floatQueue, &receivedValue, 0) == pdTRUE) {
+            // Handle received value
+            // Example: Print the received float value
+            buffer.add(receivedValue);
+        }
+		//buffer.add(getRandomAngle());
+		Serial.print("set buffer: ");
+		Serial.print(buffer.getLast());
+		Serial.print(", Second to last: ");
+		Serial.println(buffer.getSecondLast());
+		dot.fillSmoothCircle(10, 10, 10, GC9A01A_BLACK, GC9A01A_BLACK);
+		dot.pushRotated(&background, buffer.getSecondLast(), TFT_TRANSPARENT);
+		//draw the circle in the new degree
+		dot.fillSmoothCircle(10, 10, 10, GC9A01A_WHITE, GC9A01A_BLACK);
+		dot.pushRotated(&background, buffer.getLast(), TFT_TRANSPARENT);
+		background.pushSprite(0,0,TFT_TRANSPARENT);
+    }
+}
+
+
+void loop() {
+    // Empty loop as Arduino_FreeRTOS tasks handle the execution
+}

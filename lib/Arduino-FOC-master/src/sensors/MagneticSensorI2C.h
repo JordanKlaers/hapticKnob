@@ -53,7 +53,7 @@ class MagneticSensorI2C: public Sensor{
 
     /** current error code from Wire endTransmission() call **/
     uint8_t currWireError = 0;
-
+int getRawCount();
   private:
     float cpr; //!< Maximum range of the magnetic sensor
     uint16_t lsb_used; //!< Number of bits used in LSB register
@@ -72,7 +72,7 @@ class MagneticSensorI2C: public Sensor{
      * Function getting current angle register value
      * it uses angle_register variable
      */
-    int getRawCount();
+    
     
     /* the two wire instance for this sensor */
     TwoWire* wire;

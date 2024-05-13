@@ -51,3 +51,23 @@ std::array<float, 4> getFromCache(float key) {
         return {0.0f, 0.0f, 0.0f, 0.0f};
     }
 }
+
+
+bool isWithinThreshold(float value1, float value2, float threshold) {
+		// Calculate the absolute difference between the two values
+		float absDiff = std::abs(value1 - value2);
+		// Handle the special case where the values are close to the range boundary
+		if (absDiff > 180.0) {
+				absDiff = 360.0 - absDiff;
+		}
+		// Compare the absolute difference against the threshold
+		return absDiff < threshold;
+}
+float normalizeRadians(float radians) {
+		float twoPi = 2 * M_PI;
+		radians = fmod(radians, twoPi);
+		if (radians < 0) {
+				radians += twoPi;
+		}
+		return radians;
+}

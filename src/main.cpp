@@ -1,3 +1,16 @@
+// This sketch is for the RP2040 and ILI9341 TFT display.
+// Other processors may work if they have sufficient RAM for
+// a full screen buffer (240 x 320 x 2 = 153,600 bytes).
+
+// In this example 2 sprites are used to create DMA toggle
+// buffers. Each sprite is half the screen size, this allows
+// graphics to be rendered in one sprite at the same time
+// as the other sprite is being sent to the screen.
+
+// RP2040 typically runs at 45-48 fps
+
+// Created by Bodmer 20/04/2021 as an example for:
+// https://github.com/Bodmer/TFT_eSPI
 #include <Arduino.h>
 #include "./my_functions.h"
 #include "Adafruit_GC9A01A.h"
@@ -6,33 +19,24 @@
 #include <SimpleFOC.h>
 #include "haptic.h"
 #include <cmath>
-
 #include <TFT_eSPI.h>
-// Width and height of sprite
-#define TFT_WIDTH  240
-#define TFT_HEIGHT 240
-
-
-TFT_eSPI tft = TFT_eSPI();
-TFT_eSprite background = TFT_eSprite(&tft);
-TFT_eSprite dot = TFT_eSprite(&tft);
-
-
+#include <random>
+#include <iostream>
+#include <string>
 
 /*-----------------------------------------------
-	LCD Display
+	Display
 -----------------------------------------------*/
-#define MISO   -1
-#define SCLK   4
-#define MOSI   5
-#define RES    6
-#define DC     7
-#define CS     15
+#define DWIDTH  240
+#define DHEIGHT 240
+TFT_eSPI    tft = TFT_eSPI();
+TFT_eSprite spr[4] = {TFT_eSprite(&tft), TFT_eSprite(&tft), TFT_eSprite(&tft), TFT_eSprite(&tft)};
+uint16_t* sprPtr[1];
 
-float h = 0;
-float outerRadius = 0;
-float innerRadius = 0;
-uint16_t screenBuffer[240 * 240];
+CircularBuffer buffer;											//This buffer stores the positions of the dot - by degree
+bool isFluttering = false;										//variable to help stablize when the know is not spinning
+float motorShaftAngle = 0;
+
 
 /*-----------------------------------------------
 	Position Sensor
@@ -41,6 +45,7 @@ MagneticSensorI2C as5600 = MagneticSensorI2C(AS5600_I2C);
 TwoWire positionSensorI2C(1);
 #define pos_SDA_PIN 17
 #define pos_SCL_PIN 16
+
 
 /*-----------------------------------------------
 	Motor Driver
@@ -75,163 +80,137 @@ TaskHandle_t motorTaskHandle;
 TaskHandle_t lcdTaskHandle;
 void motorTask(void *pvParameters);
 void lcdTask(void *pvParameters);
+QueueHandle_t floatQueue;
 
 
+void setup() {
+	Serial.begin(115200);
+	positionSensorI2C.begin(pos_SDA_PIN, pos_SCL_PIN);
+	as5600.init(&positionSensorI2C);
+	// Add some sample values
+	buffer.add(0.0f);
+	buffer.add(0.0f);
+	buffer.add(0.0f);
 
-std::array<float, 4> coordinates = {0.0f, 0.0f, 0.0f, 0.0f};
-CircularBuffer buffer;
-bool isFluttering = false;
-float shaftAngle = 0;
-float motorShaftAngle = 0;
-bool isWithinThreshold(float value1, float value2, float threshold) {
-		// Calculate the absolute difference between the two values
-		float absDiff = std::abs(value1 - value2);
-		// Handle the special case where the values are close to the range boundary
-		if (absDiff > 180.0) {
-				absDiff = 360.0 - absDiff;
-		}
-		// Compare the absolute difference against the threshold
-		return absDiff < threshold;
+	// motor.linkSensor(&as5600);
+	// driver.voltage_power_supply = 5;
+	// driver.init();
+	// motor.linkDriver(&driver);
+	// motor.voltage_sensor_align = 5;
+	// motor.phase_resistance = 7.8; // [Ohm]
+	// motor.current_limit = 1.2;   // [Amps] - if phase resistance defined
+	// motor.voltage_limit = 5;   // [V] - if phase resistance not defined
+	// motor.velocity_limit = 20; // [rad/s] cca 50rpm
+	// motor.torque_controller = TorqueControlType::voltage;//TorqueControlType::voltage;
+	// motor.controller = MotionControlType::torque;
+	
+	// motor.init();
+	// motor.initFOC();
+	// _delay(1000);
+
+
+	tft.init();
+	tft.initDMA();
+	tft.fillScreen(TFT_BLACK);
+
+	// Create the 2 sprites, each is half the size of the screen
+	sprPtr[0] = (uint16_t*)spr[0].createSprite(DWIDTH, DHEIGHT);
+	spr[0].fillSprite(TFT_TRANSPARENT);
+	spr[0].setTextDatum(MC_DATUM);
+	spr[0].setTextColor(TFT_BLACK);
+	//spr[0].setFreeFont(FF1);
+	spr[0].setTextSize(5);
+	spr[0].setTextColor(0xFFFF, TFT_BLACK);
+	//for the 2 ticks
+	spr[1].createSprite(6, DHEIGHT / 2);
+	spr[1].setPivot(3.5, DHEIGHT / 2);
+	spr[1].fillSprite(TFT_TRANSPARENT);
+	//for the dot(white)
+	spr[2].createSprite(24, DHEIGHT / 2);
+	spr[2].setPivot(12, DHEIGHT / 2);
+	spr[2].fillSprite(TFT_TRANSPARENT);
+	spr[2].fillCircle(12, 14, 10, GC9A01A_WHITE);
+	//for the dot (black)
+	spr[3].createSprite(24, DHEIGHT / 2);
+	spr[3].setPivot(12, DHEIGHT / 2);
+	spr[3].fillSprite(TFT_TRANSPARENT);
+	spr[3].fillCircle(12, 14, 10, TFT_BLACK);
+
+	/*
+		The degrees are saved into cache if the cricle position is drawn using the x and y coordinates
+
+		if this is commented out, then the alternative approach is used, drawing the dots using the pushRotated method of the TFT_eSPI library
+	*/
+
+	tft.startWrite(); // TFT chip select held low permanently
+
+	// xTaskCreatePinnedToCore(motorTask, "MotorTask", 40000, NULL, 1, &motorTaskHandle, 1); // Task assigned to core 1
+	xTaskCreatePinnedToCore(lcdTask, "LCDTask", 40000, NULL, 1, &lcdTaskHandle, 0); // Task assigned to core 1
 }
-float normalizeRadians(float radians) {
-		float twoPi = 2 * M_PI;
-		radians = fmod(radians, twoPi);
-		if (radians < 0) {
-				radians += twoPi;
-		}
-		return radians;
+
+void loop() {
 }
 
-	void setup() {
-		Serial.begin(115200);
 
-		// Add some sample values
-		buffer.add(0.0f);
-		buffer.add(0.0f);
-		buffer.add(0.0f);
-		
-		
-		positionSensorI2C.begin(pos_SDA_PIN, pos_SCL_PIN);
-		as5600.init(&positionSensorI2C);
+void motorTask(void *pvParameters) {
+	while (1) {
+		motor.loopFOC();
+		motorShaftAngle = motor.shaft_angle;
+		motor.move(P_haptic(attract_angle - motorShaftAngle));
+		attract_angle = findAttractor(motorShaftAngle);
+	}
+}
 
-		motor.linkSensor(&as5600);
-		
-		driver.voltage_power_supply = 5;
-		driver.init();
-		motor.linkDriver(&driver);
-		motor.voltage_sensor_align = 5;
-		motor.phase_resistance = 7.8; // [Ohm]
-		motor.current_limit = 1.2;   // [Amps] - if phase resistance defined
-		motor.voltage_limit = 5;   // [V] - if phase resistance not defined
-		motor.velocity_limit = 20; // [rad/s] cca 50rpm
-		motor.torque_controller = TorqueControlType::voltage;//TorqueControlType::voltage;
-		motor.controller = MotionControlType::torque;
-		
-		motor.init();
-		motor.initFOC();
-		_delay(1000);
-
-
-
-		/*------------------------------------------------------------
-			Setting up TFT
-				this uses a background sprint to draw/clear the dot
-				the background is pushed into the display with as much transparency as possible
-
-				X and Y coordinates for the dot position are associated to the degree of the sensor
-				values are saved in an object that can manage fluttering vaules as well
-		------------------------------------------------------------*/
-		tft.begin();
-		tft.setRotation(1);
-		tft.fillScreen(GC9A01A_BLACK);
-		
-		//start with black background -> push it to display -> then reset to transparent so subsequent pushes are faster
-		background.createSprite(240, 240);
-		background.setPivot(TFT_WIDTH / 2, TFT_HEIGHT / 2);
-		background.fillSprite(GC9A01A_BLACK);
-		background.pushSprite(0,0);
-		background.fillSprite(TFT_TRANSPARENT);
-		//dot only needs to be big enough for the circle - the pivot point is the center of the screen
-		dot.createSprite(21, 21);
-		dot.setPivot(10, (TFT_HEIGHT / 2) - 10);
-		dot.fillSprite(TFT_TRANSPARENT);
-
-
-		/*
-			The degrees are saved into cache if the cricle position is drawn using the x and y coordinates
-
-			if this is commented out, then the alternative approach is used, drawing the dots using the pushRotated method of the TFT_eSPI library
-		*/
-
-		/*
-		h = tft.getViewportHeight();
-		outerRadius = h/2;
-		innerRadius = (h/2) * 0.25;
-
-		for (float i = 0; i < 361; i++) {
-			//save points x and y for the circle position into memory for faster access
-			addToCache(
-				i,
-				((innerRadius * cos(i * M_PI / 180.0f)) + outerRadius),
-				((innerRadius * sin(i * M_PI / 180.0f)) + outerRadius),
-				((outerRadius - 20) * cos(i * M_PI / 180.0f)) + outerRadius,
-				((outerRadius - 20) * sin(i * M_PI / 180.0f)) + outerRadius
+int limit = 0;
+bool shouldDraw = true;
+int direction = 0;
+void lcdTask(void *pvParameters) {
+    while (1) {
+        float shaftDegree = round(normalizeRadians(as5600.getSensorAngle()) * (360.0f / (2 * M_PI)));
+		//compare the current degree with the last degree saved to buff
+		if (shaftDegree != buffer.getLast() && (!isFluttering || !isWithinThreshold(buffer.getLast(), shaftDegree, 2))) {
+			isFluttering = buffer.add(shaftDegree);
+			bool hitAbsoluteEndStop = (
+				((limit == 1 && shaftDegree < 90 && buffer.getSecondLast() > 270)		//clockwise
+				|| (limit == -1 && shaftDegree > 270 && buffer.getSecondLast() < 90))	//counter clockwise
+				&& shouldDraw							//currently drawing
 			);
-		}
-		*/
-		xTaskCreatePinnedToCore(motorTask, "MotorTask", 10000, NULL, 1, NULL, 0); // Task assigned to core 0
-		xTaskCreatePinnedToCore(lcdTask, "LCDTask", 10000, NULL, 1, NULL, 1); // Task assigned to core 1
-	}
+			bool backInsideDrawingLimits = (
+				((limit == -1 && shaftDegree < 90 && buffer.getSecondLast() > 270)
+				|| (limit == 1 && shaftDegree > 270 && buffer.getSecondLast() < 90))
+				&& !shouldDraw
+			);
+			if (hitAbsoluteEndStop) {
+				shouldDraw = false;
+			} else if (backInsideDrawingLimits) {
+				shouldDraw = true;
+			}
 
-	void loop() {
-	}
-
-	void motorTask(void *pvParameters) {
-		while (1) {
-			motor.loopFOC();
-			motorShaftAngle = motor.shaft_angle;
-			motor.move(P_haptic(attract_angle - motorShaftAngle));
-			attract_angle = findAttractor(motorShaftAngle);
-		}
-	}
-
-	void lcdTask(void *pvParameters) {
-		/*
-			This task reads the motor angle and draws the dot at the corresponding position
-			it draws the dot into a sprite, rotated by the screen. That sprite is then pushed into a sprite representing the whole screen
-			then all of that is pushed at once into view.
-
-			As many pixels as possible are drawn transparent to speed up the drawing process
-		*/
-		while (1) {
-			shaftAngle = normalizeRadians(as5600.getSensorAngle());
-			float shaftDegree = round(shaftAngle * (360.0f / (2 * M_PI)));
-			//compare the current degree with the last degree saved to buff
-			if (shaftDegree != buffer.getLast()) {
-				/*
-					if its not fluttering, we can add the new value
-					fluttering is when the last saved degree (index 0) and the third saved degree (index 2) are the same while the second is different
-					for example [1,2,1] would be considered fluttering
-				*/
-				if (!isFluttering) {
-					//+/- 1 and not fluttering
-					isFluttering = buffer.add(shaftDegree);
-					//erase the old circle by drawing it black to match the background
-					dot.fillSmoothCircle(10, 10, 10, GC9A01A_BLACK, GC9A01A_BLACK);
-					dot.pushRotated(&background, buffer.getSecondLast(), TFT_TRANSPARENT);
-					//draw the circle in the new degree
-					dot.fillSmoothCircle(10, 10, 10, GC9A01A_WHITE, GC9A01A_BLACK);
-					dot.pushRotated(&background, buffer.getLast(), TFT_TRANSPARENT);
+			if (shouldDraw) {
+				spr[0].fillSprite(TFT_BLACK);
+				spr[0].fillRect(0,0,DWIDTH, map(shaftDegree, 45, 315, 0, DHEIGHT), GC9A01A_PURPLE);
+				spr[0].drawNumber(map(shaftDegree, 45, 315, 0, 100), DWIDTH / 2, DHEIGHT / 2, 1);
+				if (shaftDegree < 44.5) {
+					limit = -1;
+					if (shouldDraw) {
+						spr[0].drawSmoothArc((DHEIGHT/2), (DHEIGHT/2), (DHEIGHT/2) - 10, (DHEIGHT/2) - 14, shaftDegree + 180, 45 + 180, GC9A01A_WHITE, TFT_BLACK, false);
+					}
 				}
-				//if its fluttering, then we only add new value if its +/- 2
-				else if (!isWithinThreshold(shaftDegree, buffer.getLast(), 2)) {
-					isFluttering = buffer.add(shaftDegree);
-					dot.fillSmoothCircle(10, 10, 10, GC9A01A_BLACK, GC9A01A_BLACK);
-					dot.pushRotated(&background, buffer.getSecondLast(), TFT_TRANSPARENT);
-					dot.fillSmoothCircle(10, 10, 10, GC9A01A_WHITE, GC9A01A_BLACK);
-					dot.pushRotated(&background, buffer.getLast(), TFT_TRANSPARENT);
+				else if (shaftDegree > 315.5) {
+					limit = 1;
+					spr[0].drawSmoothArc((DHEIGHT/2), (DHEIGHT/2), (DHEIGHT/2) - 10, (DHEIGHT/2) - 14, 135, shaftDegree - 180, GC9A01A_WHITE, TFT_BLACK, false);
 				}
-				background.pushSprite(0,0,TFT_TRANSPARENT);
+				else {
+					limit = 0;
+				}
+				//draw and push the end stop ticks
+				spr[1].drawSmoothRoundRect(2, 2, 1, 0, 2, 20, GC9A01A_WHITE, TFT_BLACK);
+				spr[1].pushRotated(&spr[0], 45, TFT_TRANSPARENT);
+				spr[1].pushRotated(&spr[0], 315, TFT_TRANSPARENT);
+				//draw and push the dot
+				spr[2].pushRotated(&spr[0], buffer.getLast(), TFT_TRANSPARENT);
+				tft.pushImageDMA(0, 0, 240, 240, sprPtr[0]);
 			}
 		}
-	}
+    }
+}

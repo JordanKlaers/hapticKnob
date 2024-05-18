@@ -63,11 +63,3 @@ bool isWithinThreshold(float value1, float value2, float threshold) {
 		// Compare the absolute difference against the threshold
 		return absDiff < threshold;
 }
-float normalizeRadians(float radians) {
-		float twoPi = 2 * M_PI;
-		radians = fmod(radians, twoPi);
-		if (radians < 0) {
-				radians += twoPi;
-		}
-		return radians;
-}

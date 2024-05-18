@@ -47,6 +47,5 @@ public:
 };
 
 bool isWithinThreshold(float value1, float value2, float threshold);
-float normalizeRadians(float radians);
 
 #endif

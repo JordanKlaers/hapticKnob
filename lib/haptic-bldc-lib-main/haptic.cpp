@@ -122,13 +122,17 @@ void HapticInterface::change_haptic_mode(void)
 void HapticInterface::haptic_loop(void){
     
     // TODO: Include Check if Config is Correct before triggering loop
-
-    while (1){
-    correct_pid(); // Adjust PID (Derivative Gain)
-    find_detent(); // Calculate attraction angle depending on configured distance position.
-    state_update(); // Determine and update current position    
-    haptic_target(); // PID Command
-    }
+    //while (1){
+        Serial.println("before correct pid");
+        correct_pid(); // Adjust PID (Derivative Gain)
+        Serial.println("before find detent");
+        find_detent(); // Calculate attraction angle depending on configured distance position.
+        Serial.println("before state update");
+        state_update(); // Determine and update current position    
+        Serial.println("before haptic target");
+        haptic_target(); // PID Command
+        Serial.println("done loop");
+    // }
 }
 
 void HapticInterface::correct_pid(void)

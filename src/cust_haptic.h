@@ -6,7 +6,8 @@
 #include "encoders/mt6701/MagneticSensorMT6701SSI.h"
 #include <motor.h>
 #include "haptic_api.h"
- 
+
+
 class HapticState 
 {
 public:
@@ -26,10 +27,12 @@ public:
     float last_attract_angle = 0;
     float attract_hysteresis = 0.05;
 
-    float detent_strength_unit = 4; // PID (estimated) Current Limit
+    float detent_strength_unit = 1; // PID (estimated) Current Limit
     float endstop_strength_unit = 1; // PID (estimated) Current Limit
 
     bool atLimit = false;
+    bool atPosLimit = false;
+    bool atNegLimit = false;
     bool wasAtLimit = false;
 
     void load_profile(DetentProfile);
@@ -53,7 +56,7 @@ public:
     float haptic_target(void);
     void haptic_click(void);
     void change_haptic_mode(void);
-    void haptic_loop(void);
+    float haptic_loop(void);
     void correct_pid(void);
     void haptic_state_update(void);
     

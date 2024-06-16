@@ -25,7 +25,7 @@ typedef struct
     float distance_pos = distance_space * _PI / 180; // Define attractior distance position and convert it to radians
     float click_strength = sfoc_voltage_control ? 5 : 1; // 
     float detent_strength_unit = sfoc_voltage_control ? 3 : 0.6;
-    float endstop_strength_unit = sfoc_voltage_control ? 2 : 0.4;
+    float endstop_strength_unit = sfoc_voltage_control ? 3 : 0.6;//2 : 0.4;
 } hapticState;
 
 

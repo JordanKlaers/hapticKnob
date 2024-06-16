@@ -160,9 +160,7 @@ int  BLDCMotor::initFOC() {
   if(exit_flag){
     if(current_sense){
       if (!current_sense->initialized) {
-        Serial.println("Wait current sense wasnt initalized?");
         motor_status = FOCMotorStatus::motor_calib_failed;
-        SIMPLEFOC_DEBUG("MOT: Init FOC error, current sense not initialized");
         exit_flag = 0;
       }else{
         //I can skip this because the current sensors were fine with no changes needed.
@@ -341,8 +339,6 @@ void BLDCMotor::loopFOC() {
       current.q = current_sense->getDCCurrent(electrical_angle);
       // filter the value values
       current.q = LPF_current_q(current.q);
-      //Serial.print("Filtered current:\n");
-      //Serial.println(current.q);
       // calculate the phase voltage
       voltage.q = current_sp == 0 ? 0 : PID_current_q(current_sp - current.q);
       // d voltage  - lag compensation
@@ -402,14 +398,21 @@ void BLDCMotor::move(float new_target) {
   // calculate the back-emf voltage if KV_rating available U_bemf = vel*(1/KV)
   if (_isset(KV_rating)) voltage_bemf = shaft_velocity/KV_rating/_RPM_TO_RADS;
   // estimate the motor current if phase reistance available and current_sense not available
-  if(!current_sense && _isset(phase_resistance)) current.q = (voltage.q - voltage_bemf)/phase_resistance;
-
+  if(!current_sense && _isset(phase_resistance)) {
+    current.q = (voltage.q - voltage_bemf)/phase_resistance;
+  }
   // upgrade the current based voltage limit
   switch (controller) {
     case MotionControlType::torque:
       if(torque_controller == TorqueControlType::voltage){ // if voltage torque control
         if(!_isset(phase_resistance))  voltage.q = target;
         else  voltage.q =  target*phase_resistance + voltage_bemf;
+        // Serial.print("voltage_bemf: ");
+        // Serial.println(voltage_bemf);
+        //Serial.print("voltage.q (with phase resistance): ");
+        //Serial.println(target*phase_resistance + voltage_bemf);
+        //Serial.print("voltage.q: ");
+        //Serial.println(target);
         voltage.q = _constrain(voltage.q, -voltage_limit, voltage_limit);
         // set d-component (lag compensation if known inductance)
         if(!_isset(phase_inductance)) voltage.d = 0;

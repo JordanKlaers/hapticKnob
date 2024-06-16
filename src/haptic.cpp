@@ -2,7 +2,7 @@
 #include "haptic_api.h"
 #include "util.h"
 
-PIDController default_pid(5.0, 0.0, 0.004, 41, 5);
+PIDController default_pid(1, 0.0, 0.04, 10000, 7.4);
 
 /**
  * Handful of default profiles that you can quickly explore.
@@ -10,7 +10,7 @@ PIDController default_pid(5.0, 0.0, 0.004, 41, 5);
 DetentProfile default_profile{
     .mode = HapticMode::REGULAR,
     .start_pos = 0,
-    .end_pos =120,
+    .end_pos =5,
     .detent_count = 8,
     .vernier = 10,
     .kxForce = false
@@ -81,10 +81,10 @@ void Cust_HapticInterface::init(void){
     motor->foc_modulation = FOCModulationType::SpaceVectorPWM;
 };
 
-void Cust_HapticInterface::haptic_loop(void){
+float Cust_HapticInterface::haptic_loop(void){
     correct_pid(); // Adjust PID (Derivative Gain)
     find_detent(); // Calculate attraction angle depending on configured distance position.
-    haptic_target(); // PID Command
+    return haptic_target(); // PID Command
 }
 
 /**
@@ -141,8 +141,9 @@ void Cust_HapticInterface::correct_pid(void)
 
     haptic_pid->P = clipping ? haptic_state.endstop_strength_unit : haptic_state.detent_strength_unit;
 
-    if(haptic_state.wasAtLimit)
-    haptic_pid->P = 0;
+    if(haptic_state.wasAtLimit) {
+        haptic_pid->P = 0;
+    }
 }
 
 /** 
@@ -243,6 +244,8 @@ void Cust_HapticInterface::detent_handler(void){
                     haptic_state.wasAtLimit = true;
 
                 haptic_state.atLimit = false;
+                haptic_state.atNegLimit = false;
+                haptic_state.atPosLimit = false;
                 haptic_state.current_pos--;
                  
                 haptic_state.last_attract_angle = haptic_state.attract_angle;
@@ -251,6 +254,7 @@ void Cust_HapticInterface::detent_handler(void){
             else{
                 HapticEventCallback(HapticEvt::LIMIT_NEG);  
                 haptic_state.atLimit = true;
+                haptic_state.atNegLimit = true;
                 haptic_state.wasAtLimit = false;
             }
         }
@@ -261,12 +265,15 @@ void Cust_HapticInterface::detent_handler(void){
                     haptic_state.wasAtLimit = true;
                                    
                 haptic_state.atLimit = false;
+                haptic_state.atNegLimit = false;
+                haptic_state.atPosLimit = false;
                 haptic_state.current_pos++;
 
                 haptic_state.last_attract_angle = haptic_state.attract_angle;
                 HapticEventCallback(HapticEvt::INCREASE);
             }
             else{
+                haptic_state.atPosLimit = true;
                 HapticEventCallback(HapticEvt::LIMIT_POS);  
                 haptic_state.atLimit = true;
                 haptic_state.wasAtLimit = false;
@@ -282,13 +289,16 @@ void Cust_HapticInterface::detent_handler(void){
                 if(haptic_state.atLimit)
                     haptic_state.wasAtLimit = true;
                     
-                haptic_state.atLimit = false; 
-                haptic_state.current_pos++;   
-                      
+                haptic_state.atLimit = false;
+                haptic_state.atNegLimit = false;
+                haptic_state.atPosLimit = false;
+                haptic_state.current_pos++;
+     
                 haptic_state.last_attract_angle = haptic_state.attract_angle;
                 HapticEventCallback(HapticEvt::INCREASE);
             }
             else{
+                haptic_state.atPosLimit = true;
                 HapticEventCallback(HapticEvt::LIMIT_POS);
                 haptic_state.atLimit = true;
                 haptic_state.wasAtLimit = false;
@@ -300,13 +310,15 @@ void Cust_HapticInterface::detent_handler(void){
                 if(haptic_state.atLimit)
                     haptic_state.wasAtLimit = true;
                     
-                haptic_state.atLimit = false;  
+                haptic_state.atLimit = false; 
+                haptic_state.atNegLimit = false;
+                haptic_state.atPosLimit = false;
                 haptic_state.current_pos--;  
-                           
                 haptic_state.last_attract_angle = haptic_state.attract_angle;
                 HapticEventCallback(HapticEvt::DECREASE);
             }
             else{
+                haptic_state.atNegLimit = true;
                 HapticEventCallback(HapticEvt::LIMIT_NEG);
                 haptic_state.atLimit = true;
             }
@@ -318,7 +330,6 @@ void Cust_HapticInterface::detent_handler(void){
     }
 }
 void Cust_HapticInterface::donk(void) {
-    Serial.print("in donk");
 }
 
 /**
@@ -329,12 +340,15 @@ float Cust_HapticInterface::haptic_target(void)
     // TODO: When out of bounds and return to position introduce easing so we avoid overshoot.
 
     float detent_width = haptic_state.detent_profile.detent_count / _2PI;
+    float motor_shaft_angle = motor->shaft_angle;
+    float error = haptic_state.last_attract_angle - motor_shaft_angle;
+    Serial.println(motor_shaft_angle);
 
-    float error = haptic_state.last_attract_angle - motor->shaft_angle;
     float error_threshold = detent_width * 0.0075; // 0.75% gives good snap without ringing
 
     
     if(!haptic_state.atLimit){
+        error = 0;
         if(haptic_state.wasAtLimit){
             haptic_state.wasAtLimit = false;
         }
@@ -357,14 +371,14 @@ float Cust_HapticInterface::haptic_target(void)
     else {
         error = CLAMP(
             error,
-            -detent_width,
-            detent_width
+            haptic_state.atPosLimit ? 0 : -detent_width,
+            haptic_state.atNegLimit ? 0 : detent_width
         );
-
         motor->move(default_pid(error));
     }
 
-    return haptic_pid->operator()(error);
+    haptic_pid->operator()(error);
+    return motor_shaft_angle;
 }
 
 /**

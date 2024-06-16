@@ -16,6 +16,13 @@ MagneticSensorI2CConfig_s AS5048_I2C = {
   .data_start_bit = 15
 };
 
+MagneticSensorI2CConfig_s MT6701_I2C = {
+  .chip_address = 0x06,
+  .bit_resolution = 14,
+  .angle_register = 0x03,
+  .data_start_bit = 15
+};
+
 
 // MagneticSensorI2C(uint8_t _chip_address, float _cpr, uint8_t _angle_register_msb)
 //  @param _chip_address  I2C chip address
